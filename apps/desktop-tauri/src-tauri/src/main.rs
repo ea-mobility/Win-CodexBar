@@ -40,6 +40,7 @@ fn main() {
     initial_state.proof_config = proof_config;
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_shell::init())
         .manage(Mutex::new(initial_state))
         .plugin(shortcut_bridge::plugin())
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
