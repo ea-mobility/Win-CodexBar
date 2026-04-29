@@ -2,8 +2,8 @@ use std::collections::HashSet;
 use std::sync::Mutex;
 
 use codexbar::core::{
-    FetchContext, ProviderFetchResult, ProviderId, ProviderMetadata, RateWindow,
-    instantiate_provider,
+    instantiate_provider, FetchContext, ProviderFetchResult, ProviderId, ProviderMetadata,
+    RateWindow, WidgetProviderEntry, WidgetSnapshot, WidgetSnapshotStore,
 };
 use codexbar::locale;
 use codexbar::settings::{
@@ -1231,9 +1231,65 @@ pub(crate) async fn do_refresh_providers(app: &tauri::AppHandle) -> Result<(), S
         }
     }
 
+    // Save widget snapshot for external sync
+    {
+        let cached = {
+            let guard = state.lock().map_err(|e| e.to_string())?;
+            guard.provider_cache.clone()
+        };
+        tracing::info!("Saving widget snapshot for external sync ({} providers)", cached.len());
+        save_widget_snapshot(&cached);
+    }
+
     events::emit_refresh_complete(app, enabled_ids.len(), error_count);
 
     Ok(())
+}
+
+fn save_widget_snapshot(snapshots: &[ProviderUsageSnapshot]) {
+    use chrono::Utc;
+
+    let entries: Vec<WidgetProviderEntry> = snapshots
+        .iter()
+        .filter_map(|s| {
+            let provider = ProviderId::from_cli_name(&s.provider_id)?;
+            let mut entry = WidgetProviderEntry::new(provider, Utc::now());
+
+            // Map primary
+            entry.primary = Some(RateWindow {
+                used_percent: s.primary.used_percent,
+                window_minutes: s.primary.window_minutes,
+                resets_at: s.primary.resets_at.as_ref().and_then(|t| {
+                    chrono::DateTime::parse_from_rfc3339(t)
+                        .ok()
+                        .map(|dt| dt.with_timezone(&Utc))
+                }),
+                reset_description: s.primary.reset_description.clone(),
+            });
+
+            // Map secondary
+            if let Some(sec) = &s.secondary {
+                entry.secondary = Some(RateWindow {
+                    used_percent: sec.used_percent,
+                    window_minutes: sec.window_minutes,
+                    resets_at: sec.resets_at.as_ref().and_then(|t| {
+                        chrono::DateTime::parse_from_rfc3339(t)
+                            .ok()
+                            .map(|dt| dt.with_timezone(&Utc))
+                    }),
+                    reset_description: sec.reset_description.clone(),
+                });
+            }
+
+            entry.account_email = s.account_email.clone();
+            entry.login_method = s.plan_name.clone();
+
+            Some(entry)
+        })
+        .collect();
+
+    let snapshot = WidgetSnapshot::new(entries, Utc::now());
+    let _ = WidgetSnapshotStore::save(&snapshot);
 }
 
 #[tauri::command]

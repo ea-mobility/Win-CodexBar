@@ -344,6 +344,10 @@ pub struct Settings {
     /// UI theme preference (Phase 12). Defaults to Auto (prefers-color-scheme).
     #[serde(default)]
     pub theme: ThemePreference,
+
+    /// URL for Google Apps Script sync
+    #[serde(default)]
+    pub google_script_url: Option<String>,
 }
 
 fn default_global_shortcut() -> String {
@@ -479,6 +483,7 @@ struct RawSettings {
     install_updates_on_quit: bool,
     ui_language: Language,
     theme: ThemePreference,
+    google_script_url: Option<String>,
 }
 
 impl Default for RawSettings {
@@ -546,6 +551,7 @@ impl Default for RawSettings {
             install_updates_on_quit: s.install_updates_on_quit,
             ui_language: s.ui_language,
             theme: s.theme,
+            google_script_url: s.google_script_url,
         }
     }
 }
@@ -790,6 +796,7 @@ impl From<RawSettings> for Settings {
             install_updates_on_quit: raw.install_updates_on_quit,
             ui_language: raw.ui_language,
             theme: raw.theme,
+            google_script_url: raw.google_script_url,
         }
     }
 }
@@ -835,6 +842,7 @@ impl Default for Settings {
             install_updates_on_quit: false, // Don't auto-install on quit by default
             ui_language: Language::default(), // English by default
             theme: ThemePreference::default(), // Auto (follows prefers-color-scheme)
+            google_script_url: None,
         }
     }
 }
@@ -842,6 +850,12 @@ impl Default for Settings {
 impl Settings {
     /// Get the settings file path
     pub fn settings_path() -> Option<PathBuf> {
+        // Try Local first (user preference/convenience), then Roaming (canonical)
+        if let Some(local) = dirs::data_local_dir().map(|p| p.join("CodexBar").join("settings.json")) {
+            if local.exists() {
+                return Some(local);
+            }
+        }
         dirs::config_dir().map(|p| p.join("CodexBar").join("settings.json"))
     }
 

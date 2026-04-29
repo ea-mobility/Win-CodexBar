@@ -239,7 +239,7 @@ impl WidgetSnapshotStore {
         serde_json::from_str(&data).ok()
     }
 
-    /// Save widget snapshot to disk
+    /// Save widget snapshot to disk and sync to remote if configured
     pub fn save(snapshot: &WidgetSnapshot) -> Result<(), WidgetSnapshotError> {
         let path = Self::snapshot_path().ok_or(WidgetSnapshotError::PathNotAvailable)?;
 
@@ -248,9 +248,48 @@ impl WidgetSnapshotStore {
         }
 
         let json = serde_json::to_string_pretty(snapshot)?;
-        fs::write(&path, json)?;
+        fs::write(&path, json.clone())?;
 
         tracing::debug!("Saved widget snapshot to {:?}", path);
+
+        // Auto-sync to remote if URL is configured
+        let settings = crate::settings::Settings::load();
+        if let Some(url) = settings.google_script_url {
+            let token = "bKegWMZ2Tln3rv";
+            let sync_url = if url.contains('?') {
+                format!("{}&token={}", url, token)
+            } else {
+                format!("{}?token={}", url, token)
+            };
+            
+            tokio::spawn(async move {
+                let client = reqwest::Client::builder()
+                    .redirect(reqwest::redirect::Policy::limited(10))
+                    .user_agent("CodexBar-Sync")
+                    .build()
+                    .unwrap_or_default();
+                    
+                match client
+                    .post(sync_url)
+                    .header("Content-Type", "application/json")
+                    .body(json)
+                    .send()
+                    .await
+                {
+                    Ok(res) => {
+                        if res.status().is_success() {
+                            tracing::info!("Successfully synced widget snapshot to remote");
+                        } else {
+                            tracing::warn!("Failed to sync widget snapshot: HTTP {}", res.status());
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("Error syncing widget snapshot: {}", e);
+                    }
+                }
+            });
+        }
+
         Ok(())
     }
 
